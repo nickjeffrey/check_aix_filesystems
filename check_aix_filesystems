@@ -1,0 +1,246 @@
+#!/usr/bin/ksh
+
+
+# Nagios plugin for performing checks of filesystem mounts 
+# This checks for both "normal" filesystems, as well as NFS-mounted filesystems.
+#
+#
+# NFS filesystems can be tricky - this will tell us
+# if a filesystem goes away / hangs / etc.  This is important to know, as some commands (df, etc)
+# will hang indefinitely while waiting for a response from an NFS filesystem.
+#
+
+
+
+
+# NOTES
+# -----
+#  This script should return one (and only one) line of ouput.  Multiple
+#  lines of output are silently ignored by nagios.
+# 
+#  The line of output will become the body of the alert message sent by nagios
+#
+#  This script will attempt to execute the "ls" command against each NFS-mounted filesystem.
+#  Since some of the  filesystems may have restrictive permissions, we may not be able to
+#  read them as the nagios user.  To get around this, we will use sudo to run the ls command
+#  as the root user.
+#  You will need something similar to the following in the
+#  /etc/sudoers file:
+#     User_Alias      NAGIOS_USER = nagios
+#     Cmnd_Alias      LS = /usr/bin/ls
+#     NAGIOS_USER ALL = (root) NOPASSWD: LS
+#
+#  This script is executed remotely on a monitored system by the NRPE or check_by_ssh
+#  methods available in nagios.
+#
+#  If you are using the check_by_ssh method, you will need a section in the services.cfg
+#  file on the nagios server that looks similar to the following.
+#  This assumes that you already have ssh key pairs configured.
+#      define service {
+#              use                             generic-24x7-service
+#              hostgroup_name                  all_aix
+#              service_description             AIX filesystem mounts
+#              check_command                   check_by_ssh!/usr/local/nagios/libexec/check_aix_filesystems
+#              }
+#
+#
+#  Alternatively, if you are using the NRPE method, you should have a section similar to the following in
+#  the services.cfg file:
+#      define service{
+#               use                             generic-24x7-service
+#               hostgroup_name                  all_aix
+#               service_description             AIX filesystem mounts
+#               check_command                   check_nrpe!check_aix_filesystems -t 30
+#               notification_options            c,r                 ; Send notifications about critical and recovery events
+#  If you are using the NRPE method, you will also need a command definition similar to the following on each monitored host
+#  in the /usr/local/nagios/nrpe/nrpe.cfg file:
+#      command[check_aix_filesystems]=/usr/local/nagios/libexec/check_aix_filesystems
+#
+#
+
+
+
+
+# TROUBLESHOOTING
+# ---------------
+#
+# If you get a "Remote command execution failed" error from nagios, it probably means
+# you forgot to configure sudo to allow the nagios user to execute the ls command.
+#
+
+
+
+
+#define name of nagios check
+CHECK_NAME=AIX_FILESYSTEM_MOUNTS
+
+
+
+#
+# define variables
+#
+#location of rc.tcpip file which starts AIX daemons
+awk=/usr/bin/awk
+grep=/usr/bin/grep
+lsfs=/usr/sbin/lsfs
+mount=/usr/sbin/mount
+
+#
+# Nagios return codes - this script returns a value to nagios for processing
+#
+OK=0 
+WARN=1
+CRITICAL=2
+UNKNOWN=3
+
+
+
+
+#
+# confirm required files exist
+#
+if [[ ! -f "$awk" ]] then
+   echo "$CHECK_NAME required file $awk not found "
+   exit $UNKNOWN 
+fi
+if [[ ! -x "$awk" ]] then
+   echo "$CHECK_NAME required file $awk is not executable by the nagios user "
+   exit $UNKNOWN 
+fi 
+if [[ ! -f "$grep" ]] then
+   echo "$CHECK_NAME required file $grep not found "
+   exit $UNKNOWN 
+fi
+if [[ ! -x "$grep" ]] then
+   echo "$CHECK_NAME required file $grep is not executable by the nagios user "
+   exit $UNKNOWN 
+fi 
+if [[ ! -f "$lsfs" ]] then
+   echo "$CHECK_NAME required file $lsfs not found "
+   exit $UNKNOWN 
+fi
+if [[ ! -x "$lsfs" ]] then
+   echo "$CHECK_NAME required file $lsfs is not executable by the nagios user "
+   exit $UNKNOWN 
+fi 
+if [[ ! -f "$mount" ]] then
+   echo "$CHECK_NAME required file $mount not found "
+   exit $UNKNOWN 
+fi
+if [[ ! -x "$mount" ]] then
+   echo "$CHECK_NAME required file $mount is not executable by the nagios user "
+   exit $UNKNOWN 
+fi 
+
+
+#
+# Confirm that sudo is installed
+#
+test -e /usr/local/bin/sudo && SUDO=/usr/local/bin/sudo
+test -e /usr/bin/sudo       && SUDO=/usr/bin/sudo
+test -e /bin/sudo           && SUDO=/bin/sudo
+test -e $SUDO || echo "$CHECK_NAME CRITICAL - cannot find sudo"
+test -e $SUDO || exit $CRITICAL
+
+#
+# confirm sudo config file exists
+#
+test -e /etc/sudoers || echo "$CHECK_NAME CRITICAL - cannot find /etc/sudoers"
+test -e /etc/sudoers || exit $CRITICAL
+
+
+
+
+
+
+#
+# Get a list of all "regular" filesystems and put it into an array 
+# This excludes NFS filesystems and CD-ROM mounts
+#
+set -A fs `$lsfs | $grep -v ^Name | $grep -v cdrfs | $grep -v nfs | $awk '{print $3}'`
+
+
+
+#
+# confirm "regular" filesystems are in appropriate mount state
+#
+# loop through array
+for fsname in ${fs[*]} ; do
+   #
+   #confirm filesystem should be mounted at boot time
+   #
+   if  [[ `$lsfs $fsname | $grep -v ^Name | $awk '{print $7}'` = "yes" ]]; then
+      #
+      # confirm filesystem is mounted
+      #
+      $mount | $grep -v ^- | $grep -v "^  node" | $awk '{print $2}' | grep -q ^$fsname$ || echo "$CHECK_NAME CRITICAL - the $fsname filesystem is not mounted"
+      $mount | $grep -v ^- | $grep -v "^  node" | $awk '{print $2}' | grep -q ^$fsname$ || exit $CRITICAL
+      #
+   elif [[ `$lsfs $fsname | $grep -v ^Name | $awk '{print $7}'` = "no" ]] then
+      #
+      # this filesystem does not automount at boot time - ignore
+      #
+      continue
+   else
+      #
+      # could not determine if this filesystem should mount or not
+      #
+      echo "$CHECK_NAME UNKNOWN - could not determine from $lsfs output if $fsname should mount at boot time.  Please investigate."
+      exit $UNKNOWN
+   fi
+done
+
+
+
+#
+# Checks against NFS filesystems will hang indefinitely if the NFS filesystem is unavailable.
+# To work around this, define a function that will timeout after a specified number of seconds.
+# From an example found on the net...
+#
+function timeout {
+   timeout=$1
+   shift
+   #
+   # Run the command in the background and also
+   # a command to kill it if it doesn't come back
+   #
+   "$@" >/dev/null 2>&1 &
+   cmd_pid=$!
+   sleep $timeout && kill -TERM $cmd_pid 2>/dev/null &
+   kill_pid=$!
+   #
+   # Don't continue execution until the command comes back
+   # (ie it complets or the timeout expires which kills it)
+   #
+   wait $cmd_pid 2>/dev/null
+   rc=$?
+   #
+   # Just in case the timeout didn't happen...
+   # ($rc will be non-zero if command was timed out)
+   #
+   if [  $rc -ne 0 ] ; then
+      kill $kill_pid 2>/dev/null
+      echo "$CHECK_NAME CRITICAL - NFS mount $nfsdir is unavailable"
+      exit $CRITICAL
+   fi
+}
+
+
+#
+# The actual check for NFS filesystems
+#
+# Define how long "too long" is for a command to execute...
+TIMEOUT=5
+for nfsdir in `$lsfs -cv nfs | $awk -F: '!/#/ { print $1; }'`; do
+    timeout $TIMEOUT $SUDO /usr/bin/ls $nfsdir
+done
+
+ 
+
+#
+# if we get this far, it means that all the filesystems are in the appropriate mount state
+#
+echo "$CHECK_NAME OK - all filesystems are in the appropriate mount state"	
+exit $OK
+
+
