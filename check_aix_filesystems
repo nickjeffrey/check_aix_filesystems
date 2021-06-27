@@ -52,6 +52,7 @@
 #               service_description             AIX filesystem mounts
 #               check_command                   check_nrpe!check_aix_filesystems -t 30
 #               notification_options            c,r                 ; Send notifications about critical and recovery events
+#               }
 #  If you are using the NRPE method, you will also need a command definition similar to the following on each monitored host
 #  in the /usr/local/nagios/nrpe/nrpe.cfg file:
 #      command[check_aix_filesystems]=/usr/local/nagios/libexec/check_aix_filesystems
