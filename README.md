@@ -37,7 +37,7 @@ This assumes you already have ssh key pairs configured.
 
 If you are using the NRPE method, you will also need a command definition similar to the following on each monitored host in the /usr/local/nagios/nrpe/nrpe.cfg file:
 ```
-    command[check_aix_users]=/usr/local/nagios/libexec/check_aix_users
+    command[check_aix_filesystems]=/usr/local/nagios/libexec/check_aix_filesystems
 ```
 
 
