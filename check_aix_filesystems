@@ -12,6 +12,11 @@
 
 
 
+# CHANGE LOG
+# ----------
+#  2009/10/14	Nick Jeffrey	Script created
+#  2011/06/16	Nick Jeffrey	Additional error checks for location of sudo binary
+
 
 # NOTES
 # -----
@@ -137,6 +142,7 @@ fi
 #
 # Confirm that sudo is installed
 #
+SUDO=/usr/bin/sudo
 test -e /usr/local/bin/sudo && SUDO=/usr/local/bin/sudo
 test -e /usr/bin/sudo       && SUDO=/usr/bin/sudo
 test -e /bin/sudo           && SUDO=/bin/sudo
